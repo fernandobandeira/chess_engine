@@ -1,0 +1,10 @@
+[package]
+name = "chess_engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chess = "3.2.0"
+log = "0.4.19"
+log4rs = "1.2.0"
+rand = "0.8.5"
