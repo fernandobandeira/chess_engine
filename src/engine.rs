@@ -1,13 +1,14 @@
 use std::{str::FromStr, sync::mpsc::Receiver};
 
-use chess::{Board, ChessMove, MoveGen};
+use shakmaty::CastlingMode;
+use shakmaty::{Chess, Position, uci::Uci, Move};
 
 use crate::score;
 use crate::utils::{self, MINUS_INFINITY, PLUS_INFINITY};
 
 pub struct Engine {
-    board: Board,
-    best_move: ChessMove,
+    board: Chess,
+    best_move: Option<Move>,
     stop_receiver: Receiver<bool>,
     stop_search: bool,
 }
@@ -15,28 +16,30 @@ pub struct Engine {
 impl Engine {
     pub fn new(stop_receiver: Receiver<bool>) -> Engine {
         Engine {
-            board: Board::default(),
-            best_move: ChessMove::default(),
+            board: Chess::default(),
+            best_move: None,
             stop_receiver,
             stop_search: false,
         }
     }
 
     pub fn new_game(&mut self) {
-        self.board = Board::default();
+        self.board = Chess::default();
     }
 
     pub fn position(&mut self, position: &str) {
         // Example position startpos moves a2a3 b7b6
         if position.starts_with("position startpos") {
-            self.board = Board::default();
+            self.board = Chess::default();
         }
 
         if position.contains("moves") {
             // Loop through the moves
             for m in position.split(" ").skip(3) {
-                let m = ChessMove::from_str(m.trim()).unwrap();
-                self.board = self.board.make_move_new(m);
+                // Parse the move using shakmaty
+                let uci: Uci = Uci::from_str(m.trim()).unwrap();
+                let new_move = uci.to_move(&self.board).unwrap();
+                self.board.play_unchecked(&new_move);
             }
         }
     }
@@ -44,10 +47,11 @@ impl Engine {
     pub fn calculate_best_move(&mut self) {
         self.stop_search = false;
 
-        let mut best_move_iter: ChessMove = ChessMove::default();
+        let mut best_move_iter: Option<Move> = None;
         let mut depth = 1;
         loop {
-            let score = self.negamax(self.board, 0, depth, MINUS_INFINITY, PLUS_INFINITY);
+            let board = self.board.clone();
+            let score = self.negamax(board, 0, depth, MINUS_INFINITY, PLUS_INFINITY);
             if self.stop_search {
                 break;
             }
@@ -55,28 +59,31 @@ impl Engine {
                 "Depth: {} Score: {} Move: {}",
                 depth,
                 score,
-                self.best_move.to_string()
+                self.best_move.as_ref().unwrap().to_string()
             );
             depth += 1;
-            best_move_iter = self.best_move;
+            best_move_iter = Some(self.best_move.as_ref().unwrap().clone());
         }
 
-        utils::send_output(&format!("bestmove {}", best_move_iter.to_string()));
+        // Check if best_move_iter is initialized
+        if best_move_iter == None {
+            return;
+        }
+        utils::send_output(&format!("bestmove {}", best_move_iter.unwrap().to_uci(CastlingMode::Standard).to_string()));
     }
 
     fn negamax(
         &mut self,
-        board: Board,
+        board: Chess,
         ply_from_root: u32,
         depth: u32,
         mut alpha: i32,
         beta: i32,
     ) -> i32 {
-        let status: chess::BoardStatus = board.status();
-        if status == chess::BoardStatus::Checkmate {
+        if board.is_checkmate() {
             return MINUS_INFINITY;
         }
-        if status == chess::BoardStatus::Stalemate {
+        if board.is_stalemate() || board.is_insufficient_material() {
             return 0;
         }
 
@@ -85,10 +92,13 @@ impl Engine {
         }
 
         let mut best_score = MINUS_INFINITY;
-        let moves = MoveGen::new_legal(&board);
+        let moves = board.legal_moves();
         for m in moves {
+            let mut new_board = board.clone();
+            new_board.play_unchecked(&m);
+
             let score = -self.negamax(
-                board.make_move_new(m),
+                new_board,
                 ply_from_root + 1,
                 depth - 1,
                 -beta,
@@ -101,7 +111,7 @@ impl Engine {
             if best_score > alpha {
                 alpha = best_score;
                 if ply_from_root == 0 {
-                    self.best_move = m;
+                    self.best_move = Some(m);
                 }
             }
 
