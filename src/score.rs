@@ -1,4 +1,4 @@
-use chess::{BitBoard, Board};
+use chess::{BitBoard, Board, Color};
 
 const PAWN_VALUE: i32 = 100;
 const KNIGHT_VALUE: i32 = 320;
@@ -6,10 +6,17 @@ const BISHOP_VALUE: i32 = 330;
 const ROOK_VALUE: i32 = 500;
 const QUEEN_VALUE: i32 = 900;
 
-pub fn calculate_score(player_side: chess::Color, enemy_side: chess::Color, board: Board) -> i32 {
+pub fn calculate_score(board: Board) -> i32 {
+    let player_side = board.side_to_move();
+    let enemy_side: Color;
+    if player_side == Color::White {
+        enemy_side = Color::Black;
+    } else {
+        enemy_side = Color::White;
+    }
+
     let player_score = score(player_side, board);
     let enemy_score = score(enemy_side, board);
-
     return player_score - enemy_score;
 }
 

@@ -3,12 +3,15 @@ use std::{
     thread,
 };
 
+pub mod logger;
 pub mod engine;
 pub mod uci;
 pub mod score;
 pub mod utils;
 
 fn main() {
+    let _ = logger::configure_logger();
+
     // Start a channel to communicate between the UCI thread and the main thread
     let (uci_sender, uci_receiver): (Sender<String>, Receiver<String>) = mpsc::channel();
 

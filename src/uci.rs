@@ -1,8 +1,9 @@
-use std::sync::{Arc, Mutex, mpsc};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-use crate::engine::{Engine};
+use crate::engine::Engine;
+use crate::utils;
 
 pub fn listen(input_receiver: Receiver<String>) {
     let (stop_sender, stop_receiver): (Sender<bool>, Receiver<bool>) = mpsc::channel();
@@ -11,28 +12,41 @@ pub fn listen(input_receiver: Receiver<String>) {
 
     loop {
         let input = input_receiver.recv().unwrap();
+        log::debug!("Input: {}", input.trim());
         let engine = engine.clone();
+        let stop_sender = stop_sender.clone();
 
         match input.trim() {
             "uci" => init(),
             "isready" => isready(),
-            "ucinewgame" => new_game(),
-            "stop" => {
-                stop_sender.send(true).unwrap()
-            },
+            "stop" => stop_sender.send(true).unwrap(),
             "quit" => quit(),
             _ => {
-                thread::spawn(move || {
-                    let input = input.as_str();
+                let input = input.as_str();
 
-                    if input.starts_with("position") {
-                        engine.lock().unwrap().position(input);
-                    }
-        
-                    if input.starts_with("go") {
+                if input == "ucinewgame" {
+                    engine.lock().unwrap().new_game();
+                    continue;
+                }
+
+                // Example position startpos moves a2a3 b7b6
+                if input.starts_with("position") {
+                    engine.lock().unwrap().position(input);
+                    continue;
+                }
+
+                // Example go movetime 3000
+                if input.starts_with("go") {
+                    thread::spawn(move || {
+                        thread::spawn(move || {
+                            // Sleep for 1 second
+                            thread::sleep(std::time::Duration::from_secs(6));
+                            stop_sender.send(true).unwrap();
+                        });
+
                         engine.lock().unwrap().calculate_best_move();
-                    }
-                });
+                    });
+                }
             }
         }
     }
@@ -41,18 +55,13 @@ pub fn listen(input_receiver: Receiver<String>) {
 // Display the engine information
 // TODO add configuration options
 fn init() {
-    println!("id name RustyFish");
-    println!("id author Fernando Bandeira");
-    println!("uciok");
-}
-
-// TODO: Implement
-fn new_game() {
-    // Should prepare the engine for a new game
+    utils::send_output("id name RustyFish");
+    utils::send_output("id author Fernando Bandeira");
+    utils::send_output("uciok");
 }
 
 fn isready() {
-    println!("readyok")
+    utils::send_output("readyok")
 }
 
 fn quit() {

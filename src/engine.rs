@@ -1,17 +1,12 @@
-use std::{
-    str::FromStr,
-    sync::mpsc::Receiver,
-};
+use std::{str::FromStr, sync::mpsc::Receiver};
 
-use chess::{Board, Color, ChessMove, MoveGen};
+use chess::{Board, ChessMove, MoveGen};
 
-use crate::utils::{MINUS_INFINITY, PLUS_INFINITY};
 use crate::score;
+use crate::utils::{self, MINUS_INFINITY, PLUS_INFINITY};
 
 pub struct Engine {
     board: Board,
-    player_side: Color,
-    enemy_side: Color,
     best_move: ChessMove,
     stop_receiver: Receiver<bool>,
     stop_search: bool,
@@ -21,41 +16,52 @@ impl Engine {
     pub fn new(stop_receiver: Receiver<bool>) -> Engine {
         Engine {
             board: Board::default(),
-            player_side: Color::White,
-            enemy_side: Color::Black,
             best_move: ChessMove::default(),
             stop_receiver,
             stop_search: false,
         }
     }
 
-    // Example position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-    pub fn position(&mut self, input: &str) {
-        if !input.contains("fen") {
-            return;
+    pub fn new_game(&mut self) {
+        self.board = Board::default();
+    }
+
+    pub fn position(&mut self, position: &str) {
+        // Example position startpos moves a2a3 b7b6
+        if position.starts_with("position startpos") {
+            self.board = Board::default();
         }
 
-        let fen_text: Option<&str> = input.split("fen").collect::<Vec<&str>>().pop();
-        if fen_text.is_none() {
-            return;
+        if position.contains("moves") {
+            // Loop through the moves
+            for m in position.split(" ").skip(3) {
+                let m = ChessMove::from_str(m.trim()).unwrap();
+                self.board = self.board.make_move_new(m);
+            }
         }
-
-        let board = Board::from_str(fen_text.unwrap().trim()).unwrap();
-        self.board = board;
-
-        let player_side: chess::Color = board.side_to_move();
-        let enemy_side: chess::Color = match player_side {
-            chess::Color::White => chess::Color::Black,
-            chess::Color::Black => chess::Color::White,
-        };
-        self.player_side = player_side;
-        self.enemy_side = enemy_side;
     }
 
     pub fn calculate_best_move(&mut self) {
         self.stop_search = false;
-        let _ = self.negamax(self.board, 0, 10, MINUS_INFINITY, PLUS_INFINITY);
-        println!("bestmove {}", self.best_move.to_string());
+
+        let mut best_move_iter: ChessMove = ChessMove::default();
+        let mut depth = 1;
+        loop {
+            let score = self.negamax(self.board, 0, depth, MINUS_INFINITY, PLUS_INFINITY);
+            if self.stop_search {
+                break;
+            }
+            log::debug!(
+                "Depth: {} Score: {} Move: {}",
+                depth,
+                score,
+                self.best_move.to_string()
+            );
+            depth += 1;
+            best_move_iter = self.best_move;
+        }
+
+        utils::send_output(&format!("bestmove {}", best_move_iter.to_string()));
     }
 
     fn negamax(
@@ -68,19 +74,16 @@ impl Engine {
     ) -> i32 {
         let status: chess::BoardStatus = board.status();
         if status == chess::BoardStatus::Checkmate {
-            if board.side_to_move() == self.player_side {
-                return MINUS_INFINITY;
-            }
-            return PLUS_INFINITY;
+            return MINUS_INFINITY;
         }
         if status == chess::BoardStatus::Stalemate {
             return 0;
         }
 
         if depth == 0 {
-            return score::calculate_score(self.player_side, self.enemy_side, board);
+            return score::calculate_score(board);
         }
-    
+
         let mut best_score = MINUS_INFINITY;
         let moves = MoveGen::new_legal(&board);
         for m in moves {
@@ -108,15 +111,16 @@ impl Engine {
             }
 
             // Stop searching if requested
+            if self.stop_search {
+                break;
+            }
+
             if self.stop_receiver.try_recv().is_ok() {
                 self.stop_search = true;
                 break;
             }
-            if self.stop_search {
-                break;
-            }
         }
-    
+
         return best_score;
     }
 }
