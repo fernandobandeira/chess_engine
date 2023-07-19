@@ -1,10 +1,6 @@
-[package]
-name = "chess_engine"
-version = "0.1.0"
-edition = "2021"
+[workspace]
 
-[dependencies]
-log = "0.4.19"
-log4rs = "1.2.0"
-rand = "0.8.5"
-shakmaty = "0.26.0"
+members = [
+    "book",
+    "engine",
+]
