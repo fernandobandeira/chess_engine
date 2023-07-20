@@ -1,6 +1,9 @@
-use std::{str::FromStr, sync::mpsc::Receiver};
+use std::{str::FromStr, sync::mpsc::Receiver, collections::HashMap};
 
-use shakmaty::CastlingMode;
+use rand::Rng;
+use shakmaty::san::San;
+use shakmaty::zobrist::{Zobrist64, ZobristHash};
+use shakmaty::{CastlingMode, EnPassantMode};
 use shakmaty::{Chess, Position, uci::Uci, Move};
 
 use crate::score;
@@ -11,16 +14,54 @@ pub struct Engine {
     best_move: Option<Move>,
     stop_receiver: Receiver<bool>,
     stop_search: bool,
+    white_book: HashMap<u64, Vec<String>>,
+    black_book: HashMap<u64, Vec<String>>,
+    draw_book: HashMap<u64, Vec<String>>,
+    out_of_book: bool,
 }
 
 impl Engine {
     pub fn new(stop_receiver: Receiver<bool>) -> Engine {
-        Engine {
+        let white_book = include_str!("../book/white_wins_moves.bin").to_string();
+        let black_book = include_str!("../book/black_wins_moves.bin").to_string();
+        let draw_book = include_str!("../book/draw_moves.bin").to_string();
+
+        let engine = Engine {
             board: Chess::default(),
             best_move: None,
             stop_receiver,
             stop_search: false,
+            white_book: Engine::prepare_book(white_book),
+            black_book: Engine::prepare_book(black_book),
+            draw_book: Engine::prepare_book(draw_book),
+            out_of_book: false,
+        };
+
+        return engine;
+    }
+
+    pub fn prepare_book(book: String) -> HashMap<u64, Vec<String>> {
+        let mut hash_map: HashMap<u64, Vec<String>> = HashMap::new();
+
+        let book: Vec<&str> = book.split("\n").collect();
+        for line in book {
+            if line == "" {
+                continue;
+            }
+
+            // Break line into hash and count
+            let line: Vec<&str> = line.split(" ").collect();
+
+            let hash = line[0];
+
+            // Add the hash to the white book
+            let hash: u64 = hash.parse().unwrap();
+            let moves: Vec<String> = line[1..].iter().map(|s| s.to_string()).collect();
+            
+            hash_map.insert(hash, moves);
         }
+
+        return hash_map;
     }
 
     pub fn new_game(&mut self) {
@@ -44,8 +85,50 @@ impl Engine {
         }
     }
 
+    fn get_book_move(&mut self) -> Option<Move> {
+        let turn = self.board.turn();
+
+        let zobrist: Zobrist64 = self.board.zobrist_hash::<Zobrist64>(EnPassantMode::Legal);
+        let hash: u64 = zobrist.0;
+        let mut moves: Option<&Vec<String>> = None;
+
+        if turn.is_white() {
+            moves = self.white_book.get(&hash);
+        }
+        if turn.is_black() {
+            moves = self.black_book.get(&hash);
+        }
+        if moves == None {
+            moves = self.draw_book.get(&hash);
+        }
+
+        if moves != None {
+            let mut rng: rand::rngs::ThreadRng = rand::thread_rng();
+            let moves: &Vec<String> = moves.unwrap();
+
+            let random_index: usize = rng.gen_range(0..moves.len());
+            let random_move: String = moves[random_index].clone();
+
+            let best_move: Move = San::from_str(&random_move).unwrap().to_move(&self.board).unwrap();
+            return Some(best_move);
+        }
+
+        // If we get here, the hash was not found
+        self.out_of_book = true;
+        return None;
+    }
+
     pub fn calculate_best_move(&mut self) {
         self.stop_search = false;
+
+        // Check if we are out of book
+        if !self.out_of_book {
+            let best_move: Option<Move> = self.get_book_move();
+            if best_move != None {
+                utils::send_output(&format!("bestmove {}", best_move.unwrap().to_uci(CastlingMode::Standard).to_string()));
+                return;
+            }
+        }
 
         let mut best_move_iter: Option<Move> = None;
         let mut depth = 1;

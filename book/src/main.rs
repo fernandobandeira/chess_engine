@@ -4,6 +4,7 @@ use std::io::BufReader;
 use std::io::Write;
 use std::str::FromStr;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use shakmaty::Chess;
 use shakmaty::Color;
@@ -22,27 +23,27 @@ fn main() {
 
 fn zobrist(file_name: &str) {
     // Read the file line by line with the lines() method from std::io::BufRead
-    let file = fs::File::open(format!("./book/output/{}.txt", file_name)).unwrap();
+    let file: fs::File = fs::File::open(format!("./book/output/{}.txt", file_name)).unwrap();
     let reader: BufReader<fs::File> = BufReader::new(file);
 
-    let mut zobrist_hashes: HashMap<String, u32> = HashMap::new();
+    let mut zobrist_hashes: HashMap<String, HashSet<String>> = HashMap::new();
     for line in reader.lines() {
-        let line = line.unwrap();
-        let mut board = Chess::default();
+        let line: String = line.unwrap();
+        let mut board: Chess = Chess::default();
         // Break moves into individual moves
         let moves: Vec<&str> = line.split(" ").collect();
 
         let mut moves_parsed_count: u32 = 0;
         for m in moves {
-            // Parse the move into a string and play it
-            let m = San::from_str(m).unwrap().to_move(&board).unwrap();
-            board.play_unchecked(&m);
-
             // Get the zobrist hash and add it to the vector
             let zobrist: Zobrist64 = board.zobrist_hash::<Zobrist64>(EnPassantMode::Legal);
             let hash: u64 = zobrist.0;
-            let count = zobrist_hashes.entry(hash.to_string()).or_insert(0);
-            *count += 1;
+            let current_moves: &mut HashSet<String> = zobrist_hashes.entry(hash.to_string()).or_insert(HashSet::new());
+            current_moves.insert(m.to_string());
+
+            // Parse the move so we can play it
+            let m = San::from_str(m).unwrap().to_move(&board).unwrap();
+            board.play_unchecked(&m);
 
             // Only parse the first 10 moves
             moves_parsed_count += 1;
@@ -53,18 +54,21 @@ fn zobrist(file_name: &str) {
     }
 
     // Sort the zobrist hashes by the hash
-    let mut zobrist_hashes: Vec<(String, u32)> = zobrist_hashes.into_iter().collect();
+    let mut zobrist_hashes: Vec<(String, HashSet<String>)> = zobrist_hashes.into_iter().collect();
     zobrist_hashes.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Write the zobrist hashes to a file
     let mut file = fs::File::create(format!("./book/output/{}.bin", file_name)).unwrap();
-    for (hash, played_times) in zobrist_hashes {
-        // Only write hashes that have been played at least 10 times
-        if played_times < 10 {
-            continue;
+    for (hash, moves) in zobrist_hashes {
+        let mut line: String = hash;
+
+        let mut moves: Vec<String> = moves.into_iter().collect();
+        moves.sort();
+        for m in moves {
+            line.push_str(" ");
+            line.push_str(&m);
         }
 
-        let line = format!("{} {}", hash, played_times);
         file.write_all(line.as_bytes()).unwrap();
         file.write_all("\n".as_bytes()).unwrap();
     }
