@@ -2,11 +2,72 @@ use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Write;
+use std::str::FromStr;
+use std::collections::HashMap;
 
+use shakmaty::Chess;
 use shakmaty::Color;
+use shakmaty::EnPassantMode;
+use shakmaty::Position;
+use shakmaty::san::San;
+use shakmaty::zobrist::Zobrist64;
+use shakmaty::zobrist::ZobristHash;
 
 fn main() {
     parse_pgns();
+    zobrist("black_wins_moves");
+    zobrist("draw_moves");
+    zobrist("white_wins_moves");
+}
+
+fn zobrist(file_name: &str) {
+    // Read the file line by line with the lines() method from std::io::BufRead
+    let file = fs::File::open(format!("./book/output/{}.txt", file_name)).unwrap();
+    let reader: BufReader<fs::File> = BufReader::new(file);
+
+    let mut zobrist_hashes: HashMap<String, u32> = HashMap::new();
+    for line in reader.lines() {
+        let line = line.unwrap();
+        let mut board = Chess::default();
+        // Break moves into individual moves
+        let moves: Vec<&str> = line.split(" ").collect();
+
+        let mut moves_parsed_count: u32 = 0;
+        for m in moves {
+            // Parse the move into a string and play it
+            let m = San::from_str(m).unwrap().to_move(&board).unwrap();
+            board.play_unchecked(&m);
+
+            // Get the zobrist hash and add it to the vector
+            let zobrist: Zobrist64 = board.zobrist_hash::<Zobrist64>(EnPassantMode::Legal);
+            let hash: u64 = zobrist.0;
+            let count = zobrist_hashes.entry(hash.to_string()).or_insert(0);
+            *count += 1;
+
+            // Only parse the first 10 moves
+            moves_parsed_count += 1;
+            if moves_parsed_count == 10 {
+                break;
+            }
+        }
+    }
+
+    // Sort the zobrist hashes by the hash
+    let mut zobrist_hashes: Vec<(String, u32)> = zobrist_hashes.into_iter().collect();
+    zobrist_hashes.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Write the zobrist hashes to a file
+    let mut file = fs::File::create(format!("./book/output/{}.bin", file_name)).unwrap();
+    for (hash, played_times) in zobrist_hashes {
+        // Only write hashes that have been played at least 10 times
+        if played_times < 10 {
+            continue;
+        }
+
+        let line = format!("{} {}", hash, played_times);
+        file.write_all(line.as_bytes()).unwrap();
+        file.write_all("\n".as_bytes()).unwrap();
+    }
 }
 
 fn parse_pgns() {
