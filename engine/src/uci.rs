@@ -38,13 +38,18 @@ pub fn listen(input_receiver: Receiver<String>) {
                 // Example go movetime 3000
                 if input.starts_with("go") {
                     thread::spawn(move || {
+                        let (cancel_sender, cancel_receiver): (Sender<bool>, Receiver<bool>) = mpsc::channel();
                         thread::spawn(move || {
-                            // Sleep for 1 second
                             thread::sleep(std::time::Duration::from_secs(6));
+                            if cancel_receiver.try_recv().is_ok() {
+                                return;   
+                            }
+
                             stop_sender.send(true).unwrap();
                         });
 
                         engine.lock().unwrap().calculate_best_move();
+                        let _ = cancel_sender.send(true);
                     });
                 }
             }
